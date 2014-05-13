@@ -1,13 +1,42 @@
 #Load in an ASF file for a skeleton description
 #http://research.cs.wisc.edu/graphics/Courses/cs-838-1999/Jeff/ASF-AMC.html
 #Motion capture data found in the CMU MOCAP database
-from Primitives3D import *
+from OpenGL.GL import *
+import numpy as np
+
+def getRotationMatrix(rx, ry, rz, order):
+	rotX = np.eye(4)
+	rotX[1, 1] = np.cos(rx)
+	rotX[2, 1] = np.sin(rx)
+	rotX[1, 2] = -np.sin(rx)
+	rotX[2, 2] = np.cos(rx)
+	rotY = np.eye(4)
+	rotY[0, 0] = np.cos(ry)
+	rotY[2, 0] = np.sin(ry)
+	rotY[0, 2] = -np.sin(ry)
+	rotY[2, 2] = np.cos(ry)
+	rotZ = np.eye(4)
+	rotZ[0, 0] = np.cos(rz)
+	rotZ[1, 0] = np.sin(rz)
+	rotZ[0, 1] = -np.sin(rz)
+	rotZ[1, 1] = np.cos(rz)
+	matrices = [np.eye(4), np.eye(4), np.eye(4)]
+	for matrixType in order:
+		if matrixType.lower() == "rx":
+			matrices[order[matrixType]] = rotX
+		elif matrixType.lower() == "ry":
+			matrices[order[matrixType]] = rotY
+		elif matrixType.lower() == "rz":
+			matrices[order[matrixType]] = rotZ
+	return matrices[2].dot(matrices[1].dot(matrices[0]))
 
 class SkeletonRoot(object):
 	def __init__(self):
+		self.id = -1
+		self.name = "root"
 		self.axis = "XYZ"
-		self.order = "TX TY TZ RZ RY RX"
-		self.position = Point3D(0, 0, 0)
+		self.order = {}
+		self.position = [0, 0, 0]
 		self.orientation = [0, 0, 0]
 		self.children = []
 
@@ -18,7 +47,7 @@ class SkeletonBone(object):
 		self.direction = [0, 0, 0]
 		self.axis = [0, 0, 0]
 		self.length = 0.0
-		self.dof = []
+		self.dof = {}
 		self.limits = []
 		self.children = []
 
@@ -77,10 +106,12 @@ class Skeleton(object):
 						self.root.axis = fields[1]
 					elif fields[0] == "order":
 						orderstr = line.split("order")[1].lstrip()
-						self.root.order = orderstr
+						ordervals = orderstr.split()
+						for i in range(len(ordervals)):
+							self.root.order[ordervals[i].lstrip().rstrip()] = i
 					elif fields[0] == "position":
 						point = [float(x) for x in fields[1:]]
-						self.root.position = Point3D(point[0], point[1], point[2])
+						self.root.position = point
 					elif fields[0] == "orientation":
 						orientation = [float(x) for x in fields[1:]]
 						self.root.orientation = orientation
@@ -104,8 +135,9 @@ class Skeleton(object):
 					axis = [float(x) for x in fields[1:4]]
 					thisBone.axis = axis
 				elif fields[0] == "dof":
-					dof = [x.lstrip().rstrip() for x in fields[1:]]
-					thisBone.dof = dof
+					dof = [(x.lstrip().rstrip()).lower() for x in fields[1:]]
+					for i in range(0, len(dof)):
+						thisBone.dof[dof[i]] = i
 				elif fields[0] == "limits":
 					parseState = Skeleton.PARSE_BONEDATALIMITS
 					limits = line.split("(")[1]
@@ -136,6 +168,88 @@ class Skeleton(object):
 				print "Warning: Finished, but got line %s"%line
 		fin.close()
 
+class SkeletonAnimator(object):
+	def __init__(self, skeleton):
+		self.skeleton = skeleton
+		self.bonesStates = {}
+		self.NStates = 0
+	
+	def initFromFile(self, filename):
+		for bone in self.skeleton.bones:
+			self.bonesStates[bone] = []
+		fin = open(filename, 'r')
+		lineCount = 0
+		for line in fin:
+			lineCount = lineCount + 1
+			fields = ((line.lstrip()).rstrip()).split() #Splits whitespace by default	
+			if len(fields) == 0: 
+				continue #Blank line
+			if fields[0][0] in ['#', '\0', 'o'] or len(fields[0]) == 0:
+				continue #Comments and stuff
+			if fields[0] == ":FULLY-SPECIFIED":
+				continue
+			if fields[0] == ":DEGREES":
+				continue
+			if len(fields) == 1:
+				continue #The number of the frame, but I don't need to explicitly store this
+			bone = fields[0]
+			values = [float(a) for a in fields[1:]]
+			self.bonesStates[bone].append(values)	
+		self.NStates = max([len(self.bonesStates[bone]) for bone in self.bonesStates])			
+		fin.close()
+	
+	def renderNode(self, bone, level, index):
+		if index >= self.NStates:
+			return;
+		colors = [ [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1] ]
+		C = colors[bone.id%len(colors)]
+		glColor3f(C[0], C[1], C[2])
+		glPushMatrix()
+		if bone.name == "root":
+			[TX, TY, TZ, RX, RY, RZ] = [0]*6
+			if "TX" in bone.order:
+				TX = self.bonesStates[bone.name][index][bone.order["TX"]]
+			if "TY" in bone.order:
+				TY = self.bonesStates[bone.name][index][bone.order["TY"]]
+			if "TZ" in bone.order:
+				TZ = self.bonesStates[bone.name][index][bone.order["TZ"]]
+			if "RX" in bone.order:
+				RX = self.bonesStates[bone.name][index][bone.order["RX"]]*np.pi/180
+			if "RY" in bone.order:
+				RY = self.bonesStates[bone.name][index][bone.order["RY"]]*np.pi/180
+			if "RZ" in bone.order:
+				RZ = self.bonesStates[bone.name][index][bone.order["RZ"]]*np.pi/180
+			rotMatrix = getRotationMatrix(RX, RY, RZ, bone.order)
+			glMultMatrixd(rotMatrix.transpose().flatten())
+			glTranslatef(TX, TY, TZ)
+		else:
+			[rx, ry, rz] = [0]*3
+			if "rx" in bone.dof:
+				rx = self.bonesStates[bone.name][index][bone.dof["rx"]]*np.pi/180
+			if "ry" in bone.dof:
+				ry = self.bonesStates[bone.name][index][bone.dof["ry"]]*np.pi/180
+			if "rz" in bone.dof:
+				rz = self.bonesStates[bone.name][index][bone.dof["rz"]]*np.pi/180
+			rotMatrix = getRotationMatrix(rx, ry, rz, bone.dof)
+			glMultMatrixd(rotMatrix.transpose().flatten())
+			glPointSize(5)
+			glVertex3f(0, 0, 0)
+			glLineWidth(5)
+			glBegin(GL_LINES)
+			glVertex3f(0, 0, 0)
+			glVertex3f(bone.length, 0, 0)
+			glEnd()
+			glTranslatef(bone.length, 0, 0)
+		for child in bone.children:
+			self.renderNode(child, level+1, index)
+		glPopMatrix()
+	
+	def renderState(self, index):
+		self.renderNode(self.skeleton.bones['root'], 0, index)
+		
+
 if __name__ == '__main__':
 	skeleton = Skeleton()
 	skeleton.initFromFile("test.asf")
+	activity = SkeletonAnimator(skeleton)
+	activity.initFromFile("test.amc")
