@@ -1,6 +1,8 @@
 #Based off of http://wiki.wxpython.org/GLCanvas
 #Lots of help from http://wiki.wxpython.org/Getting%20Started
 from OpenGL.GL import *
+from OpenGL.GLU import *
+from OpenGL.GLUT import *
 import wx
 from wx import glcanvas
 
@@ -141,6 +143,7 @@ class MeshViewerCanvas(glcanvas.GLCanvas):
 		self.SwapBuffers()
 	
 	def initGL(self):		
+		glutInit('')
 		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.2, 0.2, 0.2, 1.0])
 		glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE)
 		glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
@@ -254,6 +257,10 @@ class MeshViewerFrame(wx.Frame):
 			self.glcanvas.animator.initFromFile(filepath)
 			self.glcanvas.Refresh()
 		dlg.Destroy()
+		[xmin, xmax, ymin, ymax, zmin, zmax] = self.glcanvas.animator.getBBox()
+		self.glcanvas.bbox = BBox3D(xmin, xmax, ymin, ymax, zmin, zmax)
+		print "BBox = %s"%self.glcanvas.bbox
+		self.glcanvas.camera.centerOnBBox(self.glcanvas.bbox, math.pi/2, math.pi/2)
 		return
 
 	def OnSaveScreenshot(self, evt):
